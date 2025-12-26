@@ -2,6 +2,8 @@ package gen
 
 import (
 	"context"
+	"reflect"
+	"strings"
 
 	"github.com/fanqingxuan/dbx/pkg/dbx"
 	"github.com/fanqingxuan/dbx/example/model"
@@ -21,9 +23,28 @@ func (d *SessionsGen) Insert(ctx context.Context, m *model.Sessions) error {
 	return err
 }
 
+func (d *SessionsGen) InsertSelective(ctx context.Context, m *model.Sessions) error {
+	cols, vals, args := d.nonNilFields(m)
+	if len(cols) == 0 { return nil }
+	query := "INSERT INTO sessions (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(vals, ",") + ")"
+	_, err := d.db.ExecCtx(ctx, query, args...)
+	return err
+}
+
 func (d *SessionsGen) Update(ctx context.Context, m *model.Sessions) error {
 	query := "UPDATE sessions SET user_id=:user_id,ip_address=:ip_address,user_agent=:user_agent,payload=:payload,last_activity=:last_activity WHERE id=:id"
 	_, err := d.db.NamedExecContext(ctx, query, m)
+	return err
+}
+
+func (d *SessionsGen) UpdateSelective(ctx context.Context, m *model.Sessions) error {
+	cols, _, args := d.nonNilFields(m)
+	if len(cols) == 0 { return nil }
+	var sets []string
+	for _, c := range cols { sets = append(sets, c+"=?") }
+	args = append(args, m.Id)
+	query := "UPDATE sessions SET " + strings.Join(sets, ",") + " WHERE id=?"
+	_, err := d.db.ExecCtx(ctx, query, args...)
 	return err
 }
 
@@ -47,6 +68,23 @@ func (d *SessionsGen) FindByIds(ctx context.Context, ids []string) ([]model.Sess
 	return list, err
 }
 
+func (d *SessionsGen) DeleteByIds(ctx context.Context, ids []string) (int64, error) {
+	if len(ids) == 0 { return 0, nil }
+	query, args, _ := d.db.In("DELETE FROM sessions WHERE id IN (?)", ids)
+	return d.ExecCtx(ctx, query, args...)
+}
+
+func (d *SessionsGen) UpdateByIds(ctx context.Context, ids []string, fields map[string]any) (int64, error) {
+	if len(ids) == 0 || len(fields) == 0 { return 0, nil }
+	var sets []string
+	var args []any
+	for k, v := range fields { sets = append(sets, k+"=?"); args = append(args, v) }
+	query := "UPDATE sessions SET " + strings.Join(sets, ",") + " WHERE id IN (?)"
+	query, inArgs, _ := d.db.In(query, ids)
+	args = append(args, inArgs...)
+	return d.ExecCtx(ctx, query, args...)
+}
+
 func (d *SessionsGen) QueryRowsCtx(ctx context.Context, dest any, query string, args ...any) error {
 	return d.db.QueryRowsCtx(ctx, dest, query, args...)
 }
@@ -67,4 +105,21 @@ func (d *SessionsGen) ExecCtx(ctx context.Context, query string, args ...any) (i
 	result, err := d.db.ExecCtx(ctx, query, args...)
 	if err != nil { return 0, err }
 	return result.RowsAffected()
+}
+
+func (d *SessionsGen) nonNilFields(m *model.Sessions) ([]string, []string, []any) {
+	var cols, vals []string
+	var args []any
+	v := reflect.ValueOf(m).Elem()
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		if f.Kind() == reflect.Ptr && f.IsNil() { continue }
+		tag := t.Field(i).Tag.Get("db")
+		if tag == "" { continue }
+		cols = append(cols, tag)
+		vals = append(vals, "?")
+		if f.Kind() == reflect.Ptr { args = append(args, f.Elem().Interface()) } else { args = append(args, f.Interface()) }
+	}
+	return cols, vals, args
 }

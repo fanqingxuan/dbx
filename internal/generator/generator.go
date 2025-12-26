@@ -76,7 +76,7 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 
 	var b strings.Builder
 	b.WriteString("package gen\n\n")
-	b.WriteString("import (\n\t\"context\"\n\t\"strings\"\n\n\t\"github.com/fanqingxuan/dbx/pkg/dbx\"\n")
+	b.WriteString("import (\n\t\"context\"\n\t\"reflect\"\n\t\"strings\"\n\n\t\"github.com/fanqingxuan/dbx/pkg/dbx\"\n")
 	b.WriteString(fmt.Sprintf("\t\"%s/model\"\n)\n\n", g.Package))
 
 	structName := t.GoName() + "Gen"
@@ -88,10 +88,27 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (%s) VALUES (%s)\"\n", t.Name, strings.Join(cols, ","), strings.Join(placeholders, ",")))
 	b.WriteString("\t_, err := d.db.NamedExecContext(ctx, query, m)\n\treturn err\n}\n\n")
 
+	// InsertSelective
+	b.WriteString(fmt.Sprintf("func (d *%s) InsertSelective(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
+	b.WriteString("\tcols, vals, args := d.nonNilFields(m)\n")
+	b.WriteString("\tif len(cols) == 0 { return nil }\n")
+	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (\" + strings.Join(cols, \",\") + \") VALUES (\" + strings.Join(vals, \",\") + \")\"\n", t.Name))
+	b.WriteString("\t_, err := d.db.ExecCtx(ctx, query, args...)\n\treturn err\n}\n\n")
+
 	// Update
 	b.WriteString(fmt.Sprintf("func (d *%s) Update(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
 	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET %s WHERE %s=:%s\"\n", t.Name, strings.Join(updates, ","), pkName, pkName))
 	b.WriteString("\t_, err := d.db.NamedExecContext(ctx, query, m)\n\treturn err\n}\n\n")
+
+	// UpdateSelective
+	b.WriteString(fmt.Sprintf("func (d *%s) UpdateSelective(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
+	b.WriteString("\tcols, _, args := d.nonNilFields(m)\n")
+	b.WriteString("\tif len(cols) == 0 { return nil }\n")
+	b.WriteString("\tvar sets []string\n")
+	b.WriteString("\tfor _, c := range cols { sets = append(sets, c+\"=?\") }\n")
+	b.WriteString(fmt.Sprintf("\targs = append(args, m.%s)\n", pk.GoName()))
+	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET \" + strings.Join(sets, \",\") + \" WHERE %s=?\"\n", t.Name, pkName))
+	b.WriteString("\t_, err := d.db.ExecCtx(ctx, query, args...)\n\treturn err\n}\n\n")
 
 	// Delete
 	b.WriteString(fmt.Sprintf("func (d *%s) Delete(ctx context.Context, %s %s) error {\n", structName, pkName, pkType))
@@ -137,7 +154,22 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	b.WriteString(fmt.Sprintf("func (d *%s) QueryColumnCtx(ctx context.Context, dest any, query string, args ...any) error {\n", structName))
 	b.WriteString("\treturn d.db.QueryColumnCtx(ctx, dest, query, args...)\n}\n\n")
 	b.WriteString(fmt.Sprintf("func (d *%s) ExecCtx(ctx context.Context, query string, args ...any) (int64, error) {\n", structName))
-	b.WriteString("\tresult, err := d.db.ExecCtx(ctx, query, args...)\n\tif err != nil { return 0, err }\n\treturn result.RowsAffected()\n}\n")
+	b.WriteString("\tresult, err := d.db.ExecCtx(ctx, query, args...)\n\tif err != nil { return 0, err }\n\treturn result.RowsAffected()\n}\n\n")
+
+	// nonNilFields helper
+	b.WriteString(fmt.Sprintf("func (d *%s) nonNilFields(m *model.%s) ([]string, []string, []any) {\n", structName, t.GoName()))
+	b.WriteString("\tvar cols, vals []string\n\tvar args []any\n")
+	b.WriteString("\tv := reflect.ValueOf(m).Elem()\n")
+	b.WriteString("\tt := v.Type()\n")
+	b.WriteString("\tfor i := 0; i < v.NumField(); i++ {\n")
+	b.WriteString("\t\tf := v.Field(i)\n")
+	b.WriteString("\t\tif f.Kind() == reflect.Ptr && f.IsNil() { continue }\n")
+	b.WriteString("\t\ttag := t.Field(i).Tag.Get(\"db\")\n")
+	b.WriteString("\t\tif tag == \"\" { continue }\n")
+	b.WriteString("\t\tcols = append(cols, tag)\n")
+	b.WriteString("\t\tvals = append(vals, \"?\")\n")
+	b.WriteString("\t\tif f.Kind() == reflect.Ptr { args = append(args, f.Elem().Interface()) } else { args = append(args, f.Interface()) }\n")
+	b.WriteString("\t}\n\treturn cols, vals, args\n}\n")
 
 	return os.WriteFile(filepath.Join(dir, t.Name+".go"), []byte(b.String()), 0644)
 }
