@@ -32,7 +32,7 @@ func (d *PasswordResetTokensGen) InsertSelective(ctx context.Context, m *model.P
 }
 
 func (d *PasswordResetTokensGen) Update(ctx context.Context, m *model.PasswordResetTokens) error {
-	query := "UPDATE password_reset_tokens SET token=:token,created_at=:created_at WHERE email=:email"
+	query := "UPDATE password_reset_tokens SET token=:token WHERE email=:email"
 	_, err := d.db.NamedExecContext(ctx, query, m)
 	return err
 }

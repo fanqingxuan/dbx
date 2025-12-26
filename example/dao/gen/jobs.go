@@ -32,7 +32,7 @@ func (d *JobsGen) InsertSelective(ctx context.Context, m *model.Jobs) error {
 }
 
 func (d *JobsGen) Update(ctx context.Context, m *model.Jobs) error {
-	query := "UPDATE jobs SET queue=:queue,payload=:payload,attempts=:attempts,reserve_time=:reserve_time,available_time=:available_time,create_time=:create_time WHERE id=:id"
+	query := "UPDATE jobs SET queue=:queue,payload=:payload,attempts=:attempts,reserve_time=:reserve_time,available_time=:available_time WHERE id=:id"
 	_, err := d.db.NamedExecContext(ctx, query, m)
 	return err
 }

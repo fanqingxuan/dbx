@@ -32,7 +32,7 @@ func (d *MigrationsGen) InsertSelective(ctx context.Context, m *model.Migrations
 }
 
 func (d *MigrationsGen) Update(ctx context.Context, m *model.Migrations) error {
-	query := "UPDATE migrations SET migration=:migration,batch=:batch,created_at=:created_at WHERE id=:id"
+	query := "UPDATE migrations SET migration=:migration,batch=:batch WHERE id=:id"
 	_, err := d.db.NamedExecContext(ctx, query, m)
 	return err
 }

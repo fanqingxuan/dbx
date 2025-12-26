@@ -18,7 +18,7 @@ func NewUsersGen(db *dbx.DB) *UsersGen {
 }
 
 func (d *UsersGen) Insert(ctx context.Context, m *model.Users) error {
-	query := "INSERT INTO users (id,name,email,email_verified_at,password,remember_token,created_at,updated_at) VALUES (:id,:name,:email,:email_verified_at,:password,:remember_token,:created_at,:updated_at)"
+	query := "INSERT INTO users (id,name,email,email_verified_at,password,remember_token,created_at) VALUES (:id,:name,:email,:email_verified_at,:password,:remember_token,:created_at)"
 	_, err := d.db.NamedExecContext(ctx, query, m)
 	return err
 }
@@ -32,7 +32,7 @@ func (d *UsersGen) InsertSelective(ctx context.Context, m *model.Users) error {
 }
 
 func (d *UsersGen) Update(ctx context.Context, m *model.Users) error {
-	query := "UPDATE users SET name=:name,email=:email,email_verified_at=:email_verified_at,password=:password,remember_token=:remember_token,created_at=:created_at,updated_at=:updated_at WHERE id=:id"
+	query := "UPDATE users SET name=:name,email=:email,email_verified_at=:email_verified_at,password=:password,remember_token=:remember_token,updated_at=:updated_at WHERE id=:id"
 	_, err := d.db.NamedExecContext(ctx, query, m)
 	return err
 }

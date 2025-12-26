@@ -66,11 +66,26 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	}
 
 	var cols, placeholders, updates []string
+	var insertCols, insertPlaceholders []string // Insert 时排除 updated_at 等
+	var updateSets []string                     // Update 时排除 created_at 等
+
+	updateIgnore := map[string]bool{"created_at": true, "create_time": true, "created_time": true, "ctime": true, "c_time": true}
+	insertIgnore := map[string]bool{"updated_at": true, "update_time": true, "modified_at": true, "modify_time": true, "utime": true, "u_time": true}
+
 	for _, c := range t.Columns {
 		cols = append(cols, c.Name)
 		placeholders = append(placeholders, ":"+c.Name)
+
+		if !insertIgnore[c.Name] {
+			insertCols = append(insertCols, c.Name)
+			insertPlaceholders = append(insertPlaceholders, ":"+c.Name)
+		}
+
 		if !c.IsPrimary {
 			updates = append(updates, c.Name+"=:"+c.Name)
+			if !updateIgnore[c.Name] {
+				updateSets = append(updateSets, c.Name+"=:"+c.Name)
+			}
 		}
 	}
 
@@ -83,24 +98,24 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	b.WriteString(fmt.Sprintf("type %s struct {\n\tdb *dbx.DB\n}\n\n", structName))
 	b.WriteString(fmt.Sprintf("func New%s(db *dbx.DB) *%s {\n\treturn &%s{db: db}\n}\n\n", structName, structName, structName))
 
-	// Insert
+	// Insert (忽略 updated_at 等)
 	b.WriteString(fmt.Sprintf("func (d *%s) Insert(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
-	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (%s) VALUES (%s)\"\n", t.Name, strings.Join(cols, ","), strings.Join(placeholders, ",")))
+	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (%s) VALUES (%s)\"\n", t.Name, strings.Join(insertCols, ","), strings.Join(insertPlaceholders, ",")))
 	b.WriteString("\t_, err := d.db.NamedExecContext(ctx, query, m)\n\treturn err\n}\n\n")
 
-	// InsertSelective
+	// InsertSelective (忽略 nil)
 	b.WriteString(fmt.Sprintf("func (d *%s) InsertSelective(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
 	b.WriteString("\tcols, vals, args := d.nonNilFields(m)\n")
 	b.WriteString("\tif len(cols) == 0 { return nil }\n")
 	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (\" + strings.Join(cols, \",\") + \") VALUES (\" + strings.Join(vals, \",\") + \")\"\n", t.Name))
 	b.WriteString("\t_, err := d.db.ExecCtx(ctx, query, args...)\n\treturn err\n}\n\n")
 
-	// Update
+	// Update (忽略 created_at 等)
 	b.WriteString(fmt.Sprintf("func (d *%s) Update(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
-	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET %s WHERE %s=:%s\"\n", t.Name, strings.Join(updates, ","), pkName, pkName))
+	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET %s WHERE %s=:%s\"\n", t.Name, strings.Join(updateSets, ","), pkName, pkName))
 	b.WriteString("\t_, err := d.db.NamedExecContext(ctx, query, m)\n\treturn err\n}\n\n")
 
-	// UpdateSelective
+	// UpdateSelective (忽略 nil)
 	b.WriteString(fmt.Sprintf("func (d *%s) UpdateSelective(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
 	b.WriteString("\tcols, _, args := d.nonNilFields(m)\n")
 	b.WriteString("\tif len(cols) == 0 { return nil }\n")
