@@ -53,6 +53,22 @@ func (g *Generator) GenerateModel(t schema.Table) error {
 	return os.WriteFile(filepath.Join(dir, t.Name+".go"), []byte(b.String()), 0644)
 }
 
+func (g *Generator) GenerateDO(t schema.Table) error {
+	dir := filepath.Join(g.OutputDir, "do")
+	os.MkdirAll(dir, 0755)
+
+	var b strings.Builder
+	b.WriteString("package do\n\n")
+
+	b.WriteString(fmt.Sprintf("type %s struct {\n", t.GoName()))
+	for _, c := range t.Columns {
+		b.WriteString(fmt.Sprintf("\t%s any\n", c.GoName()))
+	}
+	b.WriteString("}\n")
+
+	return os.WriteFile(filepath.Join(dir, t.Name+".go"), []byte(b.String()), 0644)
+}
+
 func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	dir := filepath.Join(g.OutputDir, "dao", "gen")
 	os.MkdirAll(dir, 0755)
@@ -65,64 +81,21 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 		pkName = pk.Name
 	}
 
-	var cols, placeholders, updates []string
-	var insertCols, insertPlaceholders []string // Insert 时排除 updated_at 等
-	var updateSets []string                     // Update 时排除 created_at 等
-
-	updateIgnore := map[string]bool{"created_at": true, "create_time": true, "created_time": true, "ctime": true, "c_time": true}
-	insertIgnore := map[string]bool{"updated_at": true, "update_time": true, "modified_at": true, "modify_time": true, "utime": true, "u_time": true}
-
-	for _, c := range t.Columns {
-		cols = append(cols, c.Name)
-		placeholders = append(placeholders, ":"+c.Name)
-
-		if !insertIgnore[c.Name] {
-			insertCols = append(insertCols, c.Name)
-			insertPlaceholders = append(insertPlaceholders, ":"+c.Name)
-		}
-
-		if !c.IsPrimary {
-			updates = append(updates, c.Name+"=:"+c.Name)
-			if !updateIgnore[c.Name] {
-				updateSets = append(updateSets, c.Name+"=:"+c.Name)
-			}
-		}
-	}
-
 	var b strings.Builder
 	b.WriteString("package gen\n\n")
-	b.WriteString("import (\n\t\"context\"\n\t\"reflect\"\n\t\"strings\"\n\n\t\"github.com/fanqingxuan/dbx/pkg/dbx\"\n")
+	b.WriteString("import (\n\t\"context\"\n\t\"strings\"\n\n\t\"github.com/fanqingxuan/dbx/pkg/dbx\"\n")
+	b.WriteString(fmt.Sprintf("\t\"%s/do\"\n", g.Package))
 	b.WriteString(fmt.Sprintf("\t\"%s/model\"\n)\n\n", g.Package))
 
 	structName := t.GoName() + "Gen"
 	b.WriteString(fmt.Sprintf("type %s struct {\n\tdb *dbx.DB\n}\n\n", structName))
 	b.WriteString(fmt.Sprintf("func New%s(db *dbx.DB) *%s {\n\treturn &%s{db: db}\n}\n\n", structName, structName, structName))
 
-	// Insert (忽略 updated_at 等)
-	b.WriteString(fmt.Sprintf("func (d *%s) Insert(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
-	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (%s) VALUES (%s)\"\n", t.Name, strings.Join(insertCols, ","), strings.Join(insertPlaceholders, ",")))
-	b.WriteString("\t_, err := d.db.NamedExecContext(ctx, query, m)\n\treturn err\n}\n\n")
-
-	// InsertSelective (忽略 nil)
-	b.WriteString(fmt.Sprintf("func (d *%s) InsertSelective(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
+	// Insert (使用 DO，忽略 nil 字段)
+	b.WriteString(fmt.Sprintf("func (d *%s) Insert(ctx context.Context, m do.%s) error {\n", structName, t.GoName()))
 	b.WriteString("\tcols, vals, args := d.nonNilFields(m)\n")
 	b.WriteString("\tif len(cols) == 0 { return nil }\n")
 	b.WriteString(fmt.Sprintf("\tquery := \"INSERT INTO %s (\" + strings.Join(cols, \",\") + \") VALUES (\" + strings.Join(vals, \",\") + \")\"\n", t.Name))
-	b.WriteString("\t_, err := d.db.ExecCtx(ctx, query, args...)\n\treturn err\n}\n\n")
-
-	// Update (忽略 created_at 等)
-	b.WriteString(fmt.Sprintf("func (d *%s) Update(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
-	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET %s WHERE %s=:%s\"\n", t.Name, strings.Join(updateSets, ","), pkName, pkName))
-	b.WriteString("\t_, err := d.db.NamedExecContext(ctx, query, m)\n\treturn err\n}\n\n")
-
-	// UpdateSelective (忽略 nil)
-	b.WriteString(fmt.Sprintf("func (d *%s) UpdateSelective(ctx context.Context, m *model.%s) error {\n", structName, t.GoName()))
-	b.WriteString("\tcols, _, args := d.nonNilFields(m)\n")
-	b.WriteString("\tif len(cols) == 0 { return nil }\n")
-	b.WriteString("\tvar sets []string\n")
-	b.WriteString("\tfor _, c := range cols { sets = append(sets, c+\"=?\") }\n")
-	b.WriteString(fmt.Sprintf("\targs = append(args, m.%s)\n", pk.GoName()))
-	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET \" + strings.Join(sets, \",\") + \" WHERE %s=?\"\n", t.Name, pkName))
 	b.WriteString("\t_, err := d.db.ExecCtx(ctx, query, args...)\n\treturn err\n}\n\n")
 
 	// Delete
@@ -136,8 +109,8 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	b.WriteString("\tif err != nil { return nil, err }\n\treturn &m, nil\n}\n\n")
 
 	// FindByIds
-	b.WriteString(fmt.Sprintf("func (d *%s) FindByIds(ctx context.Context, ids []%s) ([]model.%s, error) {\n", structName, pkType, t.GoName()))
-	b.WriteString(fmt.Sprintf("\tvar list []model.%s\n", t.GoName()))
+	b.WriteString(fmt.Sprintf("func (d *%s) FindByIds(ctx context.Context, ids []%s) ([]*model.%s, error) {\n", structName, pkType, t.GoName()))
+	b.WriteString(fmt.Sprintf("\tvar list []*model.%s\n", t.GoName()))
 	b.WriteString("\tif len(ids) == 0 { return list, nil }\n")
 	b.WriteString(fmt.Sprintf("\tquery, args, _ := d.db.In(\"SELECT * FROM %s WHERE %s IN (?)\", ids)\n", t.Name, pkName))
 	b.WriteString("\terr := d.db.QueryRowsCtx(ctx, &list, query, args...)\n")
@@ -149,11 +122,23 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	b.WriteString(fmt.Sprintf("\tquery, args, _ := d.db.In(\"DELETE FROM %s WHERE %s IN (?)\", ids)\n", t.Name, pkName))
 	b.WriteString("\treturn d.ExecCtx(ctx, query, args...)\n}\n\n")
 
-	// UpdateByIds
-	b.WriteString(fmt.Sprintf("func (d *%s) UpdateByIds(ctx context.Context, ids []%s, fields map[string]any) (int64, error) {\n", structName, pkType))
-	b.WriteString("\tif len(ids) == 0 || len(fields) == 0 { return 0, nil }\n")
-	b.WriteString("\tvar sets []string\n\tvar args []any\n")
-	b.WriteString("\tfor k, v := range fields { sets = append(sets, k+\"=?\"); args = append(args, v) }\n")
+	// UpdateById (使用 DO，忽略 nil 字段)
+	b.WriteString(fmt.Sprintf("func (d *%s) UpdateById(ctx context.Context, m do.%s, %s %s) (int64, error) {\n", structName, t.GoName(), pkName, pkType))
+	b.WriteString("\tcols, _, args := d.nonNilFields(m)\n")
+	b.WriteString("\tif len(cols) == 0 { return 0, nil }\n")
+	b.WriteString("\tvar sets []string\n")
+	b.WriteString("\tfor _, c := range cols { sets = append(sets, c+\"=?\") }\n")
+	b.WriteString(fmt.Sprintf("\targs = append(args, %s)\n", pkName))
+	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET \" + strings.Join(sets, \",\") + \" WHERE %s=?\"\n", t.Name, pkName))
+	b.WriteString("\treturn d.ExecCtx(ctx, query, args...)\n}\n\n")
+
+	// UpdateByIds (使用 DO，忽略 nil 字段)
+	b.WriteString(fmt.Sprintf("func (d *%s) UpdateByIds(ctx context.Context, m do.%s, ids []%s) (int64, error) {\n", structName, t.GoName(), pkType))
+	b.WriteString("\tif len(ids) == 0 { return 0, nil }\n")
+	b.WriteString("\tcols, _, args := d.nonNilFields(m)\n")
+	b.WriteString("\tif len(cols) == 0 { return 0, nil }\n")
+	b.WriteString("\tvar sets []string\n")
+	b.WriteString("\tfor _, c := range cols { sets = append(sets, c+\"=?\") }\n")
 	b.WriteString(fmt.Sprintf("\tquery := \"UPDATE %s SET \" + strings.Join(sets, \",\") + \" WHERE %s IN (?)\"\n", t.Name, pkName))
 	b.WriteString("\tquery, inArgs, _ := d.db.In(query, ids)\n")
 	b.WriteString("\targs = append(args, inArgs...)\n")
@@ -171,20 +156,13 @@ func (g *Generator) GenerateGenDAO(t schema.Table) error {
 	b.WriteString(fmt.Sprintf("func (d *%s) ExecCtx(ctx context.Context, query string, args ...any) (int64, error) {\n", structName))
 	b.WriteString("\tresult, err := d.db.ExecCtx(ctx, query, args...)\n\tif err != nil { return 0, err }\n\treturn result.RowsAffected()\n}\n\n")
 
-	// nonNilFields helper
-	b.WriteString(fmt.Sprintf("func (d *%s) nonNilFields(m *model.%s) ([]string, []string, []any) {\n", structName, t.GoName()))
+	// nonNilFields helper (遍历 DO 结构体)
+	b.WriteString(fmt.Sprintf("func (d *%s) nonNilFields(m do.%s) ([]string, []string, []any) {\n", structName, t.GoName()))
 	b.WriteString("\tvar cols, vals []string\n\tvar args []any\n")
-	b.WriteString("\tv := reflect.ValueOf(m).Elem()\n")
-	b.WriteString("\tt := v.Type()\n")
-	b.WriteString("\tfor i := 0; i < v.NumField(); i++ {\n")
-	b.WriteString("\t\tf := v.Field(i)\n")
-	b.WriteString("\t\tif f.Kind() == reflect.Ptr && f.IsNil() { continue }\n")
-	b.WriteString("\t\ttag := t.Field(i).Tag.Get(\"db\")\n")
-	b.WriteString("\t\tif tag == \"\" { continue }\n")
-	b.WriteString("\t\tcols = append(cols, tag)\n")
-	b.WriteString("\t\tvals = append(vals, \"?\")\n")
-	b.WriteString("\t\tif f.Kind() == reflect.Ptr { args = append(args, f.Elem().Interface()) } else { args = append(args, f.Interface()) }\n")
-	b.WriteString("\t}\n\treturn cols, vals, args\n}\n")
+	for _, c := range t.Columns {
+		b.WriteString(fmt.Sprintf("\tif m.%s != nil { cols = append(cols, \"%s\"); vals = append(vals, \"?\"); args = append(args, m.%s) }\n", c.GoName(), c.Name, c.GoName()))
+	}
+	b.WriteString("\treturn cols, vals, args\n}\n")
 
 	return os.WriteFile(filepath.Join(dir, t.Name+".go"), []byte(b.String()), 0644)
 }

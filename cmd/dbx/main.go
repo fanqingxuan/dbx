@@ -76,6 +76,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "generate model %s: %v\n", t.Name, err)
 			continue
 		}
+		if err := gen.GenerateDO(t); err != nil {
+			fmt.Fprintf(os.Stderr, "generate do %s: %v\n", t.Name, err)
+			continue
+		}
 		if err := gen.GenerateGenDAO(t); err != nil {
 			fmt.Fprintf(os.Stderr, "generate gen dao %s: %v\n", t.Name, err)
 			continue

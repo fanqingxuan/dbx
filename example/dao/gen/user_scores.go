@@ -2,10 +2,10 @@ package gen
 
 import (
 	"context"
-	"reflect"
 	"strings"
 
 	"github.com/fanqingxuan/dbx/pkg/dbx"
+	"github.com/fanqingxuan/dbx/example/do"
 	"github.com/fanqingxuan/dbx/example/model"
 )
 
@@ -17,33 +17,10 @@ func NewUserScoresGen(db *dbx.DB) *UserScoresGen {
 	return &UserScoresGen{db: db}
 }
 
-func (d *UserScoresGen) Insert(ctx context.Context, m *model.UserScores) error {
-	query := "INSERT INTO user_scores (id,uid,score) VALUES (:id,:uid,:score)"
-	_, err := d.db.NamedExecContext(ctx, query, m)
-	return err
-}
-
-func (d *UserScoresGen) InsertSelective(ctx context.Context, m *model.UserScores) error {
+func (d *UserScoresGen) Insert(ctx context.Context, m do.UserScores) error {
 	cols, vals, args := d.nonNilFields(m)
 	if len(cols) == 0 { return nil }
 	query := "INSERT INTO user_scores (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(vals, ",") + ")"
-	_, err := d.db.ExecCtx(ctx, query, args...)
-	return err
-}
-
-func (d *UserScoresGen) Update(ctx context.Context, m *model.UserScores) error {
-	query := "UPDATE user_scores SET uid=:uid,score=:score WHERE id=:id"
-	_, err := d.db.NamedExecContext(ctx, query, m)
-	return err
-}
-
-func (d *UserScoresGen) UpdateSelective(ctx context.Context, m *model.UserScores) error {
-	cols, _, args := d.nonNilFields(m)
-	if len(cols) == 0 { return nil }
-	var sets []string
-	for _, c := range cols { sets = append(sets, c+"=?") }
-	args = append(args, m.Id)
-	query := "UPDATE user_scores SET " + strings.Join(sets, ",") + " WHERE id=?"
 	_, err := d.db.ExecCtx(ctx, query, args...)
 	return err
 }
@@ -60,8 +37,8 @@ func (d *UserScoresGen) FindByID(ctx context.Context, id int32) (*model.UserScor
 	return &m, nil
 }
 
-func (d *UserScoresGen) FindByIds(ctx context.Context, ids []int32) ([]model.UserScores, error) {
-	var list []model.UserScores
+func (d *UserScoresGen) FindByIds(ctx context.Context, ids []int32) ([]*model.UserScores, error) {
+	var list []*model.UserScores
 	if len(ids) == 0 { return list, nil }
 	query, args, _ := d.db.In("SELECT * FROM user_scores WHERE id IN (?)", ids)
 	err := d.db.QueryRowsCtx(ctx, &list, query, args...)
@@ -74,11 +51,22 @@ func (d *UserScoresGen) DeleteByIds(ctx context.Context, ids []int32) (int64, er
 	return d.ExecCtx(ctx, query, args...)
 }
 
-func (d *UserScoresGen) UpdateByIds(ctx context.Context, ids []int32, fields map[string]any) (int64, error) {
-	if len(ids) == 0 || len(fields) == 0 { return 0, nil }
+func (d *UserScoresGen) UpdateById(ctx context.Context, m do.UserScores, id int32) (int64, error) {
+	cols, _, args := d.nonNilFields(m)
+	if len(cols) == 0 { return 0, nil }
 	var sets []string
-	var args []any
-	for k, v := range fields { sets = append(sets, k+"=?"); args = append(args, v) }
+	for _, c := range cols { sets = append(sets, c+"=?") }
+	args = append(args, id)
+	query := "UPDATE user_scores SET " + strings.Join(sets, ",") + " WHERE id=?"
+	return d.ExecCtx(ctx, query, args...)
+}
+
+func (d *UserScoresGen) UpdateByIds(ctx context.Context, m do.UserScores, ids []int32) (int64, error) {
+	if len(ids) == 0 { return 0, nil }
+	cols, _, args := d.nonNilFields(m)
+	if len(cols) == 0 { return 0, nil }
+	var sets []string
+	for _, c := range cols { sets = append(sets, c+"=?") }
 	query := "UPDATE user_scores SET " + strings.Join(sets, ",") + " WHERE id IN (?)"
 	query, inArgs, _ := d.db.In(query, ids)
 	args = append(args, inArgs...)
@@ -107,19 +95,11 @@ func (d *UserScoresGen) ExecCtx(ctx context.Context, query string, args ...any) 
 	return result.RowsAffected()
 }
 
-func (d *UserScoresGen) nonNilFields(m *model.UserScores) ([]string, []string, []any) {
+func (d *UserScoresGen) nonNilFields(m do.UserScores) ([]string, []string, []any) {
 	var cols, vals []string
 	var args []any
-	v := reflect.ValueOf(m).Elem()
-	t := v.Type()
-	for i := 0; i < v.NumField(); i++ {
-		f := v.Field(i)
-		if f.Kind() == reflect.Ptr && f.IsNil() { continue }
-		tag := t.Field(i).Tag.Get("db")
-		if tag == "" { continue }
-		cols = append(cols, tag)
-		vals = append(vals, "?")
-		if f.Kind() == reflect.Ptr { args = append(args, f.Elem().Interface()) } else { args = append(args, f.Interface()) }
-	}
+	if m.Id != nil { cols = append(cols, "id"); vals = append(vals, "?"); args = append(args, m.Id) }
+	if m.Uid != nil { cols = append(cols, "uid"); vals = append(vals, "?"); args = append(args, m.Uid) }
+	if m.Score != nil { cols = append(cols, "score"); vals = append(vals, "?"); args = append(args, m.Score) }
 	return cols, vals, args
 }

@@ -40,6 +40,35 @@ func TestGenerateModel(t *testing.T) {
 	}
 }
 
+func TestGenerateDO(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "dbx-test-*")
+	defer os.RemoveAll(tmpDir)
+
+	g := &generator.Generator{OutputDir: tmpDir, Package: "github.com/test/project"}
+
+	tbl := schema.Table{
+		Name: "user",
+		Columns: []schema.Column{
+			{Name: "id", Type: "int(11)", IsPrimary: true},
+			{Name: "name", Type: "varchar(255)"},
+		},
+	}
+
+	if err := g.GenerateDO(tbl); err != nil {
+		t.Fatalf("GenerateDO() error: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "do", "user.go"))
+	s := string(content)
+
+	checks := []string{"type User struct", "Id any", "Name any"}
+	for _, c := range checks {
+		if !strings.Contains(s, c) {
+			t.Errorf("missing: %s", c)
+		}
+	}
+}
+
 func TestGenerateGenDAO(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "dbx-test-*")
 	defer os.RemoveAll(tmpDir)
@@ -64,10 +93,11 @@ func TestGenerateGenDAO(t *testing.T) {
 	checks := []string{
 		"type UserGen struct",
 		"func NewUserGen",
-		"Insert", "Update", "Delete",
+		"Insert", "Delete",
 		"FindByID", "FindByIds",
-		"DeleteByIds", "UpdateByIds",
+		"DeleteByIds", "UpdateById", "UpdateByIds",
 		"QueryRowsCtx", "QueryRowCtx", "ExecCtx",
+		"do.User", "[]*model.User",
 	}
 	for _, c := range checks {
 		if !strings.Contains(s, c) {

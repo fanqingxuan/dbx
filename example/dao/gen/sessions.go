@@ -2,10 +2,10 @@ package gen
 
 import (
 	"context"
-	"reflect"
 	"strings"
 
 	"github.com/fanqingxuan/dbx/pkg/dbx"
+	"github.com/fanqingxuan/dbx/example/do"
 	"github.com/fanqingxuan/dbx/example/model"
 )
 
@@ -17,33 +17,10 @@ func NewSessionsGen(db *dbx.DB) *SessionsGen {
 	return &SessionsGen{db: db}
 }
 
-func (d *SessionsGen) Insert(ctx context.Context, m *model.Sessions) error {
-	query := "INSERT INTO sessions (id,user_id,ip_address,user_agent,payload,last_activity) VALUES (:id,:user_id,:ip_address,:user_agent,:payload,:last_activity)"
-	_, err := d.db.NamedExecContext(ctx, query, m)
-	return err
-}
-
-func (d *SessionsGen) InsertSelective(ctx context.Context, m *model.Sessions) error {
+func (d *SessionsGen) Insert(ctx context.Context, m do.Sessions) error {
 	cols, vals, args := d.nonNilFields(m)
 	if len(cols) == 0 { return nil }
 	query := "INSERT INTO sessions (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(vals, ",") + ")"
-	_, err := d.db.ExecCtx(ctx, query, args...)
-	return err
-}
-
-func (d *SessionsGen) Update(ctx context.Context, m *model.Sessions) error {
-	query := "UPDATE sessions SET user_id=:user_id,ip_address=:ip_address,user_agent=:user_agent,payload=:payload,last_activity=:last_activity WHERE id=:id"
-	_, err := d.db.NamedExecContext(ctx, query, m)
-	return err
-}
-
-func (d *SessionsGen) UpdateSelective(ctx context.Context, m *model.Sessions) error {
-	cols, _, args := d.nonNilFields(m)
-	if len(cols) == 0 { return nil }
-	var sets []string
-	for _, c := range cols { sets = append(sets, c+"=?") }
-	args = append(args, m.Id)
-	query := "UPDATE sessions SET " + strings.Join(sets, ",") + " WHERE id=?"
 	_, err := d.db.ExecCtx(ctx, query, args...)
 	return err
 }
@@ -60,8 +37,8 @@ func (d *SessionsGen) FindByID(ctx context.Context, id string) (*model.Sessions,
 	return &m, nil
 }
 
-func (d *SessionsGen) FindByIds(ctx context.Context, ids []string) ([]model.Sessions, error) {
-	var list []model.Sessions
+func (d *SessionsGen) FindByIds(ctx context.Context, ids []string) ([]*model.Sessions, error) {
+	var list []*model.Sessions
 	if len(ids) == 0 { return list, nil }
 	query, args, _ := d.db.In("SELECT * FROM sessions WHERE id IN (?)", ids)
 	err := d.db.QueryRowsCtx(ctx, &list, query, args...)
@@ -74,11 +51,22 @@ func (d *SessionsGen) DeleteByIds(ctx context.Context, ids []string) (int64, err
 	return d.ExecCtx(ctx, query, args...)
 }
 
-func (d *SessionsGen) UpdateByIds(ctx context.Context, ids []string, fields map[string]any) (int64, error) {
-	if len(ids) == 0 || len(fields) == 0 { return 0, nil }
+func (d *SessionsGen) UpdateById(ctx context.Context, m do.Sessions, id string) (int64, error) {
+	cols, _, args := d.nonNilFields(m)
+	if len(cols) == 0 { return 0, nil }
 	var sets []string
-	var args []any
-	for k, v := range fields { sets = append(sets, k+"=?"); args = append(args, v) }
+	for _, c := range cols { sets = append(sets, c+"=?") }
+	args = append(args, id)
+	query := "UPDATE sessions SET " + strings.Join(sets, ",") + " WHERE id=?"
+	return d.ExecCtx(ctx, query, args...)
+}
+
+func (d *SessionsGen) UpdateByIds(ctx context.Context, m do.Sessions, ids []string) (int64, error) {
+	if len(ids) == 0 { return 0, nil }
+	cols, _, args := d.nonNilFields(m)
+	if len(cols) == 0 { return 0, nil }
+	var sets []string
+	for _, c := range cols { sets = append(sets, c+"=?") }
 	query := "UPDATE sessions SET " + strings.Join(sets, ",") + " WHERE id IN (?)"
 	query, inArgs, _ := d.db.In(query, ids)
 	args = append(args, inArgs...)
@@ -107,19 +95,14 @@ func (d *SessionsGen) ExecCtx(ctx context.Context, query string, args ...any) (i
 	return result.RowsAffected()
 }
 
-func (d *SessionsGen) nonNilFields(m *model.Sessions) ([]string, []string, []any) {
+func (d *SessionsGen) nonNilFields(m do.Sessions) ([]string, []string, []any) {
 	var cols, vals []string
 	var args []any
-	v := reflect.ValueOf(m).Elem()
-	t := v.Type()
-	for i := 0; i < v.NumField(); i++ {
-		f := v.Field(i)
-		if f.Kind() == reflect.Ptr && f.IsNil() { continue }
-		tag := t.Field(i).Tag.Get("db")
-		if tag == "" { continue }
-		cols = append(cols, tag)
-		vals = append(vals, "?")
-		if f.Kind() == reflect.Ptr { args = append(args, f.Elem().Interface()) } else { args = append(args, f.Interface()) }
-	}
+	if m.Id != nil { cols = append(cols, "id"); vals = append(vals, "?"); args = append(args, m.Id) }
+	if m.UserId != nil { cols = append(cols, "user_id"); vals = append(vals, "?"); args = append(args, m.UserId) }
+	if m.IpAddress != nil { cols = append(cols, "ip_address"); vals = append(vals, "?"); args = append(args, m.IpAddress) }
+	if m.UserAgent != nil { cols = append(cols, "user_agent"); vals = append(vals, "?"); args = append(args, m.UserAgent) }
+	if m.Payload != nil { cols = append(cols, "payload"); vals = append(vals, "?"); args = append(args, m.Payload) }
+	if m.LastActivity != nil { cols = append(cols, "last_activity"); vals = append(vals, "?"); args = append(args, m.LastActivity) }
 	return cols, vals, args
 }

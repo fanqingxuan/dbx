@@ -96,7 +96,10 @@ tables: user, order
 
 ```
 ├── model/
-│   ├── user.go           # 表结构体
+│   ├── user.go           # 表结构体（查询返回用）
+│   └── order.go
+├── do/
+│   ├── user.go           # 数据对象（插入/更新用，字段为 any 类型）
 │   └── order.go
 ├── dao/
 │   ├── gen/
@@ -133,9 +136,8 @@ func main() {
 ```go
 ctx := context.Background()
 
-// 插入
-user := &model.User{Name: "test", Age: 18}
-err := userDAO.Insert(ctx, user)
+// 插入（使用 do，nil 字段不写入）
+err := userDAO.Insert(ctx, do.User{Name: "test", Age: 18})
 
 // 根据 ID 查询
 user, err := userDAO.FindByID(ctx, 1)
@@ -143,9 +145,8 @@ user, err := userDAO.FindByID(ctx, 1)
 // 根据多个 ID 查询
 users, err := userDAO.FindByIds(ctx, []int64{1, 2, 3})
 
-// 更新
-user.Name = "updated"
-err = userDAO.Update(ctx, user)
+// 根据 ID 更新（使用 do，nil 字段不更新）
+affected, err := userDAO.UpdateById(ctx, do.User{Name: "updated"}, 1)
 
 // 删除
 err = userDAO.Delete(ctx, 1)
@@ -153,18 +154,15 @@ err = userDAO.Delete(ctx, 1)
 // 批量删除
 affected, err := userDAO.DeleteByIds(ctx, []int64{1, 2, 3})
 
-// 批量更新
-affected, err := userDAO.UpdateByIds(ctx, []int64{1, 2, 3}, map[string]any{
-    "status": 1,
-    "name":   "batch",
-})
+// 批量更新（使用 do，nil 字段不更新）
+affected, err := userDAO.UpdateByIds(ctx, do.User{Status: 1, Name: "batch"}, []int64{1, 2, 3})
 ```
 
 ### 自定义查询
 
 ```go
 // 查询多行
-var users []model.User
+var users []*model.User
 err := userDAO.QueryRowsCtx(ctx, &users, "SELECT * FROM user WHERE age > ?", 18)
 
 // 查询单行
@@ -204,8 +202,8 @@ func (d *UserDAO) FindByName(ctx context.Context, name string) (*model.User, err
     return &user, nil
 }
 
-func (d *UserDAO) FindActiveUsers(ctx context.Context) ([]model.User, error) {
-    var users []model.User
+func (d *UserDAO) FindActiveUsers(ctx context.Context) ([]*model.User, error) {
+    var users []*model.User
     err := d.QueryRowsCtx(ctx, &users, "SELECT * FROM user WHERE status = 1")
     return users, err
 }
